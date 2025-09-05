@@ -1,0 +1,14 @@
+# Comment at start
+
+  # Comment with leading spaces
+     
+timestamp,value,name
+# Data starts here
+100,test1,Alice
+
+# Comment between data
+200,test2,Bob
+   # More leading spaces
+300,test3,Charlie
+
+# End comment
