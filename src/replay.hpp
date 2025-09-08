@@ -234,29 +234,52 @@ private:
       const std::string &header = _headers[i];
       const std::string &value = row[i];
 
-      // Check if this is an array index (contains a number in the keypath)
-      auto parts = split_keypath(header);
+      // Check if this is an array index (contains [n] notation)
+      std::string base_keypath = header;
       bool is_array = false;
-      std::string base_keypath;
       int array_index = -1;
 
-      for (size_t j = 0; j < parts.size(); ++j) {
-        if (is_numeric(parts[j])) {
+      // Look for pattern: something[n] where n is a number
+      size_t bracket_start = header.find('[');
+      size_t bracket_end = header.find(']');
+      
+      if (bracket_start != std::string::npos && bracket_end != std::string::npos && bracket_start < bracket_end) {
+        std::string index_str = header.substr(bracket_start + 1, bracket_end - bracket_start - 1);
+        if (is_numeric(index_str)) {
           is_array = true;
-          array_index = static_cast<int>(std::stoi(parts[j]));
-
-          // Build base keypath (everything before the numeric part)
-          for (size_t k = 0; k < j; ++k) {
-            if (k > 0)
-              base_keypath += ".";
-            base_keypath += parts[k];
-          }
-          break;
+          array_index = static_cast<int>(std::stoi(index_str));
+          base_keypath = header.substr(0, bracket_start);
         }
       }
 
       if (is_array) {
-        arrays[base_keypath][array_index] = value;
+        // Check for nested fields after the array index
+        std::string remaining_path;
+        if (bracket_end + 1 < header.length()) {
+          // Skip the dot after ]
+          remaining_path = header.substr(bracket_end + 2);
+        }
+
+        if (!remaining_path.empty()) {
+          // If this doesn't exist in our array map yet, create it as an empty object
+          if (arrays[base_keypath].find(array_index) == arrays[base_keypath].end()) {
+            arrays[base_keypath][array_index] = "{}";  // Empty JSON object marker
+          }
+          // Only create sub-object if we haven't already
+          if (arrays[base_keypath][array_index] == "{}") {
+            nlohmann::json obj = nlohmann::json::object();
+            set_nested_value(obj, remaining_path, value);
+            arrays[base_keypath][array_index] = obj.dump();
+          } else if (arrays[base_keypath][array_index][0] == '{') {
+            // Parse existing JSON object, add new field, and store back
+            nlohmann::json obj = nlohmann::json::parse(arrays[base_keypath][array_index]);
+            set_nested_value(obj, remaining_path, value);
+            arrays[base_keypath][array_index] = obj.dump();
+          }
+        } else {
+          // Simple array value
+          arrays[base_keypath][array_index] = value;
+        }
       } else {
         set_nested_value(result, header, value);
       }
@@ -273,23 +296,27 @@ private:
         max_index = std::max(max_index, iv.first);
       }
 
-      // Create array
-      nlohmann::json array = nlohmann::json::array();
-      for (int i = 0; i <= max_index; ++i) {
-        auto it = index_value_map.find(i);
-        if (it != index_value_map.end()) {
-          // Try to parse as number first, then as string
-          if (is_numeric(it->second)) {
-            array.push_back(parse_number(it->second));
+      // Process array values (both simple values and objects)
+      if (!index_value_map.empty()) {
+        nlohmann::json array = nlohmann::json::array();
+        for (int i = 0; i <= max_index; ++i) {
+          auto it = index_value_map.find(i);
+          if (it != index_value_map.end()) {
+            const std::string& val = it->second;
+            if (val[0] == '{') {
+              // This is a JSON object string
+              array.push_back(nlohmann::json::parse(val));
+            } else if (is_numeric(val)) {
+              array.push_back(parse_number(val));
+            } else {
+              array.push_back(val);
+            }
           } else {
-            array.push_back(it->second);
+            array.push_back(nullptr); // Missing index
           }
-        } else {
-          array.push_back(nullptr); // Missing index
         }
+        set_nested_value(result, base_path, array);
       }
-
-      set_nested_value(result, base_path, array);
     }
 
     return result;
@@ -332,11 +359,34 @@ private:
 
   std::vector<std::string> split_keypath(const std::string &keypath) {
     std::vector<std::string> parts;
-    std::stringstream ss(keypath);
-    std::string part;
-
-    while (std::getline(ss, part, '.')) {
-      parts.push_back(part);
+    std::string current;
+    
+    for (size_t i = 0; i < keypath.length(); ++i) {
+      if (keypath[i] == '.') {
+        if (!current.empty()) {
+          parts.push_back(current);
+          current.clear();
+        }
+      }
+      else if (keypath[i] == '[') {
+        // Push current part if not empty
+        if (!current.empty()) {
+          parts.push_back(current);
+          current.clear();
+        }
+        // Skip until closing bracket
+        size_t bracket_end = keypath.find(']', i);
+        if (bracket_end != std::string::npos) {
+          i = bracket_end;
+        }
+      }
+      else {
+        current += keypath[i];
+      }
+    }
+    
+    if (!current.empty()) {
+      parts.push_back(current);
     }
 
     return parts;

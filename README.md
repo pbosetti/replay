@@ -8,7 +8,7 @@ A **header-only** C++17 class that reads CSV files line by line and converts the
 - **Lambda Support**: `play()` method for functional-style processing with lambdas
 - **Comment Support**: Lines starting with `#` (with optional leading spaces) are automatically skipped
 - **Nested Objects**: Column names with dots (e.g., `acceleration.x`) create nested JSON objects
-- **Arrays**: Column names with numeric indices (e.g., `signal.0`, `signal.1`, `signal.2`) create JSON arrays
+- **Arrays**: Column names with numeric indices (e.g., `signal[0]`, `signal[1]`, `signal[2]`) create JSON arrays
 - **Type Detection**: Automatically converts numeric values to JSON numbers
 - **CSV Parsing**: Handles quoted fields and commas within fields
 - **File Navigation**: Support for reading line by line and resetting to the beginning
@@ -18,7 +18,7 @@ A **header-only** C++17 class that reads CSV files line by line and converts the
 Given this CSV file:
 ```csv
 # This is a comment - it will be skipped
-timestamp,acceleration.x,acceleration.y,signal.0,signal.1,signal.2,driver.name
+timestamp,acceleration.x,acceleration.y,signal[0],signal[1],signal[2],driver.name
 # Another comment with data explanation
 1609459200,2.5,1.3,101,102,103,John Doe
   # Comments can have leading spaces too

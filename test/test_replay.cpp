@@ -111,8 +111,8 @@ TEST(nested_objects) {
   ASSERT_EQ("John Doe", json["driver"]["name"]);
   ASSERT_EQ(35.0, json["driver"]["age"]);
 
-  ASSERT_EQ(37.7749, json["position"]["latitude"]);
-  ASSERT_EQ(-122.4194, json["position"]["longitude"]);
+  ASSERT_EQ(37.7749, json["position"][0]["latitude"]);
+  ASSERT_EQ(-122.4194, json["position"][0]["longitude"]);
 }
 
 TEST(array_parsing) {
