@@ -1,10 +1,10 @@
 /*
-  ____            _             
- |  _ \ ___ _ __ | | __ _ _   _ 
+  ____            _
+ |  _ \ ___ _ __ | | __ _ _   _
  | |_) / _ \ '_ \| |/ _` | | | |
  |  _ <  __/ |_) | | (_| | |_| |
  |_| \_\___| .__/|_|\__,_|\__, |
-           |_|            |___/ 
+           |_|            |___/
 Class for replaying CSV files as sequence of JSON objects.
 AUthor: Paolo Bosetti, University of Trento
 License: MIT
@@ -15,6 +15,7 @@ License: MIT
 #include <algorithm>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -76,11 +77,11 @@ public:
 
   // Check if there are more lines to read
   // In loop mode, this always returns true (infinite loop)
-  bool has_next() const { 
+  bool has_next() const {
     if (_loop_enabled) {
-      return true;  // Always has next in loop mode
+      return true; // Always has next in loop mode
     }
-    return _file.good() && !_file.eof(); 
+    return _file.good() && !_file.eof();
   }
 
   // Reset to beginning of file (after header)
@@ -98,15 +99,14 @@ public:
     }
   }
 
-  // Process all remaining lines by calling the provided lambda with each JSON object
-  // The lambda should accept a const nlohmann::json& parameter
-  // In loop mode, max_cycles limits the number of complete cycles through the data
-  // (0 = unlimited cycles, which creates infinite loop)
-  // Examples:
-  //   replay.play([](const auto& json) { std::cout << json.dump() << std::endl; });
-  //   replay.play([](const auto& json) { process(json); }, 3);  // max 3 cycles
-  template <typename Func> 
-  void play(Func &&func, size_t max_cycles = 0) {
+  // Process all remaining lines by calling the provided lambda with each JSON
+  // object The lambda should accept a const nlohmann::json& parameter In loop
+  // mode, max_cycles limits the number of complete cycles through the data (0 =
+  // unlimited cycles, which creates infinite loop) Examples:
+  //   replay.play([](const auto& json) { std::cout << json.dump() << std::endl;
+  //   }); replay.play([](const auto& json) { process(json); }, 3);  // max 3
+  //   cycles
+  template <typename Func> void play(Func &&func, size_t max_cycles = 0) {
     if (!_loop_enabled || max_cycles == 0) {
       // Normal mode: process until end of file or unlimited cycles in loop mode
       while (has_next()) {
@@ -122,50 +122,47 @@ public:
       if (rows_per_cycle == 0) {
         return; // No data to process
       }
-      
+
       size_t total_rows_to_process = max_cycles * rows_per_cycle;
       size_t rows_processed = 0;
-      
+
       reset(); // Start from beginning
-      
+
       while (rows_processed < total_rows_to_process && has_next()) {
         auto json_obj = advance();
         if (json_obj.empty()) {
-          break;  // Shouldn't happen in loop mode, but safety check
+          break; // Shouldn't happen in loop mode, but safety check
         }
-        
+
         func(json_obj);
         rows_processed++;
       }
     }
   }
 
-  // Set loop mode - if true, advance() will reset to beginning when EOF is reached
-  void set_loop(bool enabled) {
-    _loop_enabled = enabled;
-  }
-  
+  // Set loop mode - if true, advance() will reset to beginning when EOF is
+  // reached
+  void set_loop(bool enabled) { _loop_enabled = enabled; }
+
   // Get current loop mode
-  bool is_loop_enabled() const {
-    return _loop_enabled;
-  }
+  bool is_loop_enabled() const { return _loop_enabled; }
 
 private:
   std::ifstream _file;
-  std::vector<std::string> _headers;
+  std::vector<nlohmann::json::json_pointer> _headers;
   bool __headersparsed;
-  bool _loop_enabled = false;  // Loop mode flag
+  bool _loop_enabled = false; // Loop mode flag
 
   // Helper methods
-  
+
   // Count the number of data rows in the file (excluding header and comments)
   size_t count_data_rows() {
     // Save current position
     auto current_pos = _file.tellg();
-    
+
     // Reset to beginning to count rows
     reset();
-    
+
     size_t count = 0;
     std::string line;
     while (std::getline(_file, line)) {
@@ -175,14 +172,14 @@ private:
       }
       count++;
     }
-    
+
     // Restore file position
     _file.clear();
     _file.seekg(current_pos);
-    
+
     return count;
   }
-  
+
   void parse_headers() {
     std::string header_line;
     while (std::getline(_file, header_line)) {
@@ -190,8 +187,10 @@ private:
       if (is_comment_line(header_line) || is_empty_line(header_line)) {
         continue;
       }
-
-      _headers = parse_csv_line(header_line);
+      std::vector<std::string> keypaths = parse_csv_line(header_line);
+      for (auto &kp : keypaths) {
+        _headers.emplace_back(pointer_from_string(kp));
+      }
       __headersparsed = true;
       return;
     }
@@ -224,173 +223,53 @@ private:
     return result;
   }
 
+  std::string normalize_keypath(const std::string &input) {
+    std::string output;
+    if (input[0] == '/') { // already a json_pointer string
+      return input;
+    }
+    output.reserve(input.size());
+
+    for (size_t i = 0; i < input.size(); ++i) {
+      char c = input[i];
+
+      if (c == ']') {
+        // If ']' is followed by '.', replace the pair "]." with '/'
+        if (i + 1 < input.size() && input[i + 1] == '.') {
+          output.push_back('/');
+          ++i; // skip the dot as well
+        }
+        // otherwise skip the ']' (remove it)
+      } else if (c == '.' || c == '[') {
+        output.push_back('/');
+      } else {
+        output.push_back(c);
+      }
+    }
+
+    return output;
+  }
+
+  nlohmann::json::json_pointer pointer_from_string(std::string &path) {
+    nlohmann::json::json_pointer ptr("/" + normalize_keypath(path));
+    std::cout << "[" << ptr << "] ";
+    return ptr;
+  }
+
   nlohmann::json build_json_from_row(const std::vector<std::string> &row) {
     nlohmann::json result = nlohmann::json::object();
-
-    // Group array indices by their base keypath
-    std::map<std::string, std::map<int, std::string>> arrays;
-
     for (size_t i = 0; i < _headers.size() && i < row.size(); ++i) {
-      const std::string &header = _headers[i];
+      const nlohmann::json::json_pointer &header = _headers[i];
       const std::string &value = row[i];
-
-      // Check if this is an array index (contains [n] notation)
-      std::string base_keypath = header;
-      bool is_array = false;
-      int array_index = -1;
-
-      // Look for pattern: something[n] where n is a number
-      size_t bracket_start = header.find('[');
-      size_t bracket_end = header.find(']');
-      
-      if (bracket_start != std::string::npos && bracket_end != std::string::npos && bracket_start < bracket_end) {
-        std::string index_str = header.substr(bracket_start + 1, bracket_end - bracket_start - 1);
-        if (is_numeric(index_str)) {
-          is_array = true;
-          array_index = static_cast<int>(std::stoi(index_str));
-          base_keypath = header.substr(0, bracket_start);
-        }
-      }
-
-      if (is_array) {
-        // Check for nested fields after the array index
-        std::string remaining_path;
-        if (bracket_end + 1 < header.length()) {
-          // Skip the dot after ]
-          remaining_path = header.substr(bracket_end + 2);
-        }
-
-        if (!remaining_path.empty()) {
-          // If this doesn't exist in our array map yet, create it as an empty object
-          if (arrays[base_keypath].find(array_index) == arrays[base_keypath].end()) {
-            arrays[base_keypath][array_index] = "{}";  // Empty JSON object marker
-          }
-          // Only create sub-object if we haven't already
-          if (arrays[base_keypath][array_index] == "{}") {
-            nlohmann::json obj = nlohmann::json::object();
-            set_nested_value(obj, remaining_path, value);
-            arrays[base_keypath][array_index] = obj.dump();
-          } else if (arrays[base_keypath][array_index][0] == '{') {
-            // Parse existing JSON object, add new field, and store back
-            nlohmann::json obj = nlohmann::json::parse(arrays[base_keypath][array_index]);
-            set_nested_value(obj, remaining_path, value);
-            arrays[base_keypath][array_index] = obj.dump();
-          }
-        } else {
-          // Simple array value
-          arrays[base_keypath][array_index] = value;
-        }
+      if (is_numeric(value)) {
+        result[header] = parse_number(value);
       } else {
-        set_nested_value(result, header, value);
+        result[header] = value;
       }
     }
-
-    // Process arrays
-    for (const auto &array_pair : arrays) {
-      const std::string &base_path = array_pair.first;
-      const auto &index_value_map = array_pair.second;
-
-      // Find the maximum index to size the array properly
-      int max_index = -1;
-      for (const auto &iv : index_value_map) {
-        max_index = std::max(max_index, iv.first);
-      }
-
-      // Process array values (both simple values and objects)
-      if (!index_value_map.empty()) {
-        nlohmann::json array = nlohmann::json::array();
-        for (int i = 0; i <= max_index; ++i) {
-          auto it = index_value_map.find(i);
-          if (it != index_value_map.end()) {
-            const std::string& val = it->second;
-            if (val[0] == '{') {
-              // This is a JSON object string
-              array.push_back(nlohmann::json::parse(val));
-            } else if (is_numeric(val)) {
-              array.push_back(parse_number(val));
-            } else {
-              array.push_back(val);
-            }
-          } else {
-            array.push_back(nullptr); // Missing index
-          }
-        }
-        set_nested_value(result, base_path, array);
-      }
-    }
-
     return result;
   }
 
-  void set_nested_value(nlohmann::json &obj, const std::string &keypath,
-                        const std::string &value) {
-    auto parts = split_keypath(keypath);
-    nlohmann::json *current = &obj;
-
-    for (size_t i = 0; i < parts.size() - 1; ++i) {
-      if (!current->contains(parts[i]) || !(*current)[parts[i]].is_object()) {
-        (*current)[parts[i]] = nlohmann::json::object();
-      }
-      current = &(*current)[parts[i]];
-    }
-
-    // Set the final value, trying to parse as number first
-    if (is_numeric(value)) {
-      (*current)[parts.back()] = parse_number(value);
-    } else {
-      (*current)[parts.back()] = value;
-    }
-  }
-
-  void set_nested_value(nlohmann::json &obj, const std::string &keypath,
-                        const nlohmann::json &value) {
-    auto parts = split_keypath(keypath);
-    nlohmann::json *current = &obj;
-
-    for (size_t i = 0; i < parts.size() - 1; ++i) {
-      if (!current->contains(parts[i]) || !(*current)[parts[i]].is_object()) {
-        (*current)[parts[i]] = nlohmann::json::object();
-      }
-      current = &(*current)[parts[i]];
-    }
-
-    (*current)[parts.back()] = value;
-  }
-
-  std::vector<std::string> split_keypath(const std::string &keypath) {
-    std::vector<std::string> parts;
-    std::string current;
-    
-    for (size_t i = 0; i < keypath.length(); ++i) {
-      if (keypath[i] == '.') {
-        if (!current.empty()) {
-          parts.push_back(current);
-          current.clear();
-        }
-      }
-      else if (keypath[i] == '[') {
-        // Push current part if not empty
-        if (!current.empty()) {
-          parts.push_back(current);
-          current.clear();
-        }
-        // Skip until closing bracket
-        size_t bracket_end = keypath.find(']', i);
-        if (bracket_end != std::string::npos) {
-          i = bracket_end;
-        }
-      }
-      else {
-        current += keypath[i];
-      }
-    }
-    
-    if (!current.empty()) {
-      parts.push_back(current);
-    }
-
-    return parts;
-  }
 
   bool is_numeric(const std::string &str) {
     if (str.empty())
