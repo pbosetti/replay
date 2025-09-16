@@ -252,7 +252,6 @@ private:
 
   nlohmann::json::json_pointer pointer_from_string(std::string &path) {
     nlohmann::json::json_pointer ptr("/" + normalize_keypath(path));
-    std::cout << "[" << ptr << "] ";
     return ptr;
   }
 
