@@ -246,7 +246,9 @@ private:
         output.push_back(c);
       }
     }
-
+    if (output[0] != '/') {
+      output = "/" + output;
+    }
     return output;
   }
 
